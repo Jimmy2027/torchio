@@ -1,4 +1,3 @@
-
 from typing import Union, Tuple, Optional
 import numpy as np
 import torch
@@ -18,40 +17,72 @@ class RandomBiasField(RandomTransform):
         p: Probability that this transform will be applied.
         seed: See :py:class:`~torchio.transforms.augmentation.RandomTransform`.
     """
+
     def __init__(
             self,
             coefficients: Union[float, Tuple[float, float]] = 0.5,
             order: int = 3,
             p: float = 1,
             seed: Optional[int] = None,
-            ):
-        super().__init__(p=p, seed=seed)
+            is_tensor=False,
+    ):
+        print('bruuuuuuh')
+        super().__init__(p=p, seed=seed, is_tensor=is_tensor)
         self.coefficients_range = self.parse_range(
             coefficients, 'coefficients_range')
         self.order = order
+        self.is_tensor = is_tensor
 
     def apply_transform(self, sample: Subject) -> dict:
         random_parameters_images_dict = {}
-        for image_name, image_dict in sample.get_images_dict().items():
+        if not self.is_tensor:
+            for image_name, image_dict in sample.get_images_dict().items():
+                coefficients = self.get_params(
+                    self.order,
+                    self.coefficients_range,
+                )
+                random_parameters_dict = {'coefficients': coefficients}
+                random_parameters_images_dict[image_name] = random_parameters_dict
+
+                bias_field = self.generate_bias_field(
+                    image_dict[DATA], self.order, coefficients)
+                image_with_bias = image_dict[DATA] * torch.from_numpy(bias_field)
+                image_dict[DATA] = image_with_bias
+            sample.add_transform(self, random_parameters_images_dict)
+        else:
             coefficients = self.get_params(
                 self.order,
                 self.coefficients_range,
             )
-            random_parameters_dict = {'coefficients': coefficients}
-            random_parameters_images_dict[image_name] = random_parameters_dict
+            sample = self.apply_bias_transform(sample, coefficients)
 
-            bias_field = self.generate_bias_field(
-                image_dict[DATA], self.order, coefficients)
-            image_with_bias = image_dict[DATA] * torch.from_numpy(bias_field)
-            image_dict[DATA] = image_with_bias
-        sample.add_transform(self, random_parameters_images_dict)
         return sample
+
+    def apply_bias_transform(self,
+                             tensor: torch.Tensor,
+                             coefficients,
+                             ):
+        assert len(tensor) == 1
+        if len(tensor.shape) == 4:
+            bias_field = self.generate_bias_field(tensor, self.order, coefficients)
+            tensor = tensor * torch.from_numpy(bias_field)
+        elif len(tensor.shape) == 5:
+            for channel in range(tensor.shape[-1]):
+                bias_field = self.generate_bias_field(tensor[..., channel], self.order, coefficients)
+
+                tensor[..., channel] = tensor[..., channel] * torch.from_numpy(bias_field)
+        else:
+            raise Exception('Input dimension must be either (1, x, y, z) or (1, x, y, z, c)')
+        print(type(tensor))
+
+        # return torch.from_numpy(tensor)
+        return tensor
 
     @staticmethod
     def get_params(
             order: int,
             coefficients_range: Tuple[float, float],
-            ) -> Tuple[bool, np.ndarray]:
+    ) -> Tuple[bool, np.ndarray]:
         # Sampling of the appropriate number of coefficients for the creation
         # of the bias field map
         random_coefficients = []
@@ -67,7 +98,7 @@ class RandomBiasField(RandomTransform):
             data: TypeData,
             order: int,
             coefficients: TypeData,
-            ) -> np.ndarray:
+    ) -> np.ndarray:
         # Create the bias field map using a linear combination of polynomial
         # functions and the coefficients previously sampled
         shape = np.array(data.shape[1:])  # first axis is channels
@@ -88,10 +119,10 @@ class RandomBiasField(RandomTransform):
                 for z_order in range(order + 1 - (x_order + y_order)):
                     random_coefficient = coefficients[i]
                     new_map = (
-                        random_coefficient
-                        * x_mesh ** x_order
-                        * y_mesh ** y_order
-                        * z_mesh ** z_order
+                            random_coefficient
+                            * x_mesh ** x_order
+                            * y_mesh ** y_order
+                            * z_mesh ** z_order
                     )
                     bias_field += np.transpose(new_map, (1, 0, 2))  # why?
                     i += 1
