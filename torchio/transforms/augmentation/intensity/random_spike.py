@@ -25,14 +25,16 @@ class RandomSpike(RandomTransform):
     .. note:: The execution time of this transform does not depend on the
         number of spikes.
     """
+
     def __init__(
             self,
             num_spikes: Union[int, Tuple[int, int]] = 1,
             intensity: Union[float, Tuple[float, float]] = (0.1, 1),
             p: float = 1,
             seed: Optional[int] = None,
-            ):
-        super().__init__(p=p, seed=seed)
+            is_tensor=False,
+    ):
+        super().__init__(p=p, seed=seed, is_tensor=False)
         self.intensity_range = self.parse_range(
             intensity, 'intensity_range')
         if isinstance(num_spikes, int):
@@ -65,26 +67,38 @@ class RandomSpike(RandomTransform):
                     ' of an inverse Fourier transform'
                 )
                 warnings.warn(message)
-            image = self.nib_to_sitk(
-                image_dict[DATA][0],
-                image_dict[AFFINE],
-            )
-            image_dict[DATA] = self.add_artifact(
-                image,
-                num_spikes_param,
-                intensity_param,
-            )
-            # Add channels dimension
-            image_dict[DATA] = image_dict[DATA][np.newaxis, ...]
-            image_dict[DATA] = torch.from_numpy(image_dict[DATA])
-        sample.add_transform(self, random_parameters_images_dict)
+            if not self.is_tensor:
+                image = self.nib_to_sitk(
+                    image_dict[DATA][0],
+                    image_dict[AFFINE],
+                )
+                image_dict[DATA] = self.add_artifact(
+                    image,
+                    num_spikes_param,
+                    intensity_param,
+                )
+                # Add channels dimension
+                image_dict[DATA] = image_dict[DATA][np.newaxis, ...]
+                image_dict[DATA] = torch.from_numpy(image_dict[DATA])
+                sample.add_transform(self, random_parameters_images_dict)
+            else:
+                coefficients = self.get_params(
+                    self.order,
+                    self.coefficients_range,
+                )
+                sample =  self.add_artifact(
+                    sample,
+                    num_spikes_param,
+                    intensity_param,
+                )
+
         return sample
 
     @staticmethod
     def get_params(
             num_spikes_range: Tuple[int, int],
             intensity_range: Tuple[float, float],
-            ) -> Tuple:
+    ) -> Tuple:
         ns_min, ns_max = num_spikes_range
         num_spikes_param = torch.randint(ns_min, ns_max + 1, (1,)).item()
         intensity_param = torch.FloatTensor(1).uniform_(*intensity_range)
@@ -95,7 +109,7 @@ class RandomSpike(RandomTransform):
             image: sitk.Image,
             num_spikes: int,
             intensity_factor: float,
-            ):
+    ):
         array = sitk.GetArrayViewFromImage(image).transpose()
         spectrum = self.fourier_transform(array).ravel()
         for _ in range(num_spikes):

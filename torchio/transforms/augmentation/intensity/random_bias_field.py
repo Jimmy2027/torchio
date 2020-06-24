@@ -26,7 +26,6 @@ class RandomBiasField(RandomTransform):
             seed: Optional[int] = None,
             is_tensor=False,
     ):
-        print('bruuuuuuh')
         super().__init__(p=p, seed=seed, is_tensor=is_tensor)
         self.coefficients_range = self.parse_range(
             coefficients, 'coefficients_range')
@@ -73,9 +72,6 @@ class RandomBiasField(RandomTransform):
                 tensor[..., channel] = tensor[..., channel] * torch.from_numpy(bias_field)
         else:
             raise Exception('Input dimension must be either (1, x, y, z) or (1, x, y, z, c)')
-        print(type(tensor))
-
-        # return torch.from_numpy(tensor)
         return tensor
 
     @staticmethod
